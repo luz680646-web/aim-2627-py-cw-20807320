@@ -292,10 +292,74 @@ class SentryState(Enum):
     RETURN = "RETURN"
 
 
+def _safe_int(value, default=0):
+    """普通非法数值（包括 None、非数值文本、无穷）使用默认值。"""
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _engage_action(distance, robot_type):
+    """R4 与 R6 共用相同的交火动作。"""
+    if distance <= 3:
+        return "SHOOT", SentryState.ENGAGE
+    action = "MOVE_RIGHT" if robot_type == "HERO" else "MOVE_LEFT"
+    return action, SentryState.ENGAGE
+
+
 def decide(sensor, state, hp, heat):
-    """TODO(Q5)：纯函数决策，返回 (action: str, new_state: SentryState)；
-    sensor 字段契约、R1-R7 规则表与非法输入处理见题面 Q5 规范。"""
-    raise NotImplementedError("Q5 decide：题面 Q5·决策规则表 R1-R7")
+    """按 R1–R7 首条命中返回，不修改输入；未公开阈值见 README。"""
+    required = ("enemy_frames", "enemy_dist", "robot_type", "max_hp")
+    if not isinstance(state, SentryState):
+        raise ValueError("state 必须是 SentryState 成员")
+    if not isinstance(sensor, dict) or any(k not in sensor for k in required):
+        raise ValueError("sensor 缺少必要字段")
+    frames = sensor["enemy_frames"]
+    if isinstance(frames, (tuple, list)):
+        if not 1 <= len(frames) <= 6:
+            raise ValueError("enemy_frames 长度必须为 1–6")
+        frames = tuple(bool(frame) for frame in frames)
+    else:
+        # 字段存在但类型非法：保守归一为当前帧不可见。
+        frames = (False,)
+    distance = _safe_int(sensor["enemy_dist"], default=-1)
+    if distance < 0:
+        distance = float("inf")
+    robot_type = sensor["robot_type"]
+    if robot_type not in ("HERO", "INFANTRY"):
+        robot_type = "INFANTRY"
+    hp_pct = hp_ratio(_safe_int(hp), _safe_int(sensor["max_hp"]))
+    visible = frames[-1]
+
+    # R1：保命优先，即使正在返航或敌人贴脸也先撤退。
+    if hp_pct <= 30:
+        return "RETREAT", SentryState.RETREAT
+    # R2：安全血量暂定为 60%，与低血量阈值分开。
+    if state is SentryState.RETREAT:
+        if hp_pct >= 60:
+            return "RETURN", SentryState.RETURN
+        return "RETREAT", SentryState.RETREAT
+    # R3：返航状态只持续一次决策。
+    if state is SentryState.RETURN:
+        return "MOVE_BASE", SentryState.PATROL
+    if state is SentryState.ENGAGE:
+        # R4：可见时交火；heat 没有出现在题面规则条件中。
+        if visible:
+            return _engage_action(distance, robot_type)
+        # R5：持续丢失暂定为连续三个末尾帧都不可见。
+        if len(frames) >= 3 and not any(frames[-3:]):
+            return "SCAN", SentryState.SUSPECT
+        return "HOLD_FIRE", SentryState.ENGAGE
+    # R6：连续两帧确认，不是整段历史中任意两帧。
+    if visible:
+        if len(frames) >= 2 and frames[-2]:
+            return _engage_action(distance, robot_type)
+        return "SCAN", SentryState.SUSPECT
+    # R7：默认巡逻或继续搜索。
+    if state is SentryState.PATROL:
+        return "PATROL_MOVE", SentryState.PATROL
+    return "SCAN", SentryState.SUSPECT
 
 
 # ---------------------------------------------------------------------------
