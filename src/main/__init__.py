@@ -218,21 +218,41 @@ class SentryGrid:
 
     @current_pos.setter
     def current_pos(self, value):
-        """TODO(Q3)：位置 setter；三重输入校验见题面 Q3 规范第 1 条。"""
-        raise NotImplementedError("Q3 current_pos.setter：题面 Q3·位置校验三步")
+        """校验容器、规范化坐标、拒绝障碍，成功后才更新位置。"""
+        if not isinstance(value, (tuple, list)) or len(value) != 2:
+            raise TypeError("位置需要长度为 2 的 tuple/list")
+        position = self._clamp_cell(value)
+        if position in self._obstacles:
+            raise ValueError("位置不能位于障碍物上")
+        self._pos = position
 
     def move_forward(self):
-        """TODO(Q3)：朝当前 facing 前进一格，返回执行后的位置；
-        碰撞、耗电与断电语义见题面 Q3 规范。"""
-        raise NotImplementedError("Q3 move_forward：题面 Q3·前进、碰撞与断电")
+        """有电时尝试前进一步；障碍和边界均视为碰撞。"""
+        if self._fuel <= 0:
+            return self._pos
+        self._fuel -= 1
+        dx, dy = self._facing.delta
+        x, y = self._pos
+        next_pos = (x + dx, y + dy)
+        if self.is_blocked(*next_pos):
+            self._collision_count += 1
+        else:
+            self._pos = next_pos
+        return self._pos
 
     def turn_left(self):
-        """TODO(Q3)：原地左转 90°，返回新的 Facing（不耗电）。"""
-        raise NotImplementedError("Q3 turn_left")
+        """原地左转 90°，不耗电。"""
+        left = {Facing.UP: Facing.LEFT, Facing.LEFT: Facing.DOWN,
+                Facing.DOWN: Facing.RIGHT, Facing.RIGHT: Facing.UP}
+        self._facing = left[self._facing]
+        return self._facing
 
     def turn_right(self):
-        """TODO(Q3)：原地右转 90°，返回新的 Facing（不耗电）。"""
-        raise NotImplementedError("Q3 turn_right")
+        """原地右转 90°，不耗电。"""
+        right = {Facing.UP: Facing.RIGHT, Facing.RIGHT: Facing.DOWN,
+                 Facing.DOWN: Facing.LEFT, Facing.LEFT: Facing.UP}
+        self._facing = right[self._facing]
+        return self._facing
 
 
 # ---------------------------------------------------------------------------
