@@ -11,6 +11,7 @@
 - `python main.py`（或 PYTHONPATH=src python -m main）可看 ASCII 演示。
 """
 import json
+from collections import deque
 from enum import Enum
 
 
@@ -365,15 +366,82 @@ def decide(sensor, state, hp, heat):
 # ---------------------------------------------------------------------------
 # Q6 巡逻任务（题面 Q6·巡逻契约与验收阈值）
 # ---------------------------------------------------------------------------
+def _escape_route(grid):
+    """贪心失速时，在有限地图内搜索绕行路线，返回方向队列。"""
+    start = grid.current_pos
+    queue = deque([start])
+    parents = {start: None}
+    while queue:
+        pos = queue.popleft()
+        if pos == grid.enemy_pos:
+            route = deque()
+            while pos != start:
+                previous, direction = parents[pos]
+                route.appendleft(direction)
+                pos = previous
+            return route
+        for direction in Facing:
+            dx, dy = direction.delta
+            nxt = (pos[0] + dx, pos[1] + dy)
+            if nxt not in parents and not grid.is_blocked(*nxt):
+                parents[nxt] = (pos, direction)
+                queue.append(nxt)
+    return deque()
+
+
+def _face_direction(grid, direction):
+    """只通过载体公开方法转向，不直接修改内部状态。"""
+    clockwise = (Facing.UP, Facing.RIGHT, Facing.DOWN, Facing.LEFT)
+    turns = (clockwise.index(direction)
+             - clockwise.index(grid.facing)) % 4
+    if turns == 3:
+        grid.turn_left()
+    else:
+        for _ in range(turns):
+            grid.turn_right()
+
+
 def run_patrol(grid, max_steps=500):
-    """TODO(Q6)：sense → decide → act 主循环；
-    循环结构、终止条件、脱困自由度与统计返回契约见题面 Q6 规范。"""
-    raise NotImplementedError("Q6 run_patrol：题面 Q6·主循环与统计契约")
+    """贪心优先、搜索脱困；统计本次前进尝试和实际访问的格子。"""
+    steps = 0
+    initial_collisions = grid.collision_count
+    visited = {grid.current_pos}
+    decision_positions = set()
+    route = deque()
+    while steps < max_steps and grid.fuel > 0 and not grid.found_enemy:
+        pos = grid.current_pos
+        target = grid.enemy_pos
+        direction = next_step_toward(pos, target, grid.obstacles, grid.facing)
+        dx, dy = direction.delta
+        nxt = (pos[0] + dx, pos[1] + dy)
+        distance = abs(target[0] - pos[0]) + abs(target[1] - pos[1])
+        next_distance = abs(target[0] - nxt[0]) + abs(target[1] - nxt[1])
+        stalled = (grid.is_blocked(*nxt) or next_distance >= distance
+                   or pos in decision_positions)
+        if not route and stalled:
+            route = _escape_route(grid)
+            if not route:
+                # 地图完全不可达时安全结束，不反复撞墙。
+                break
+        if route:
+            direction = route.popleft()
+        decision_positions.add(pos)
+        _face_direction(grid, direction)
+        grid.move_forward()
+        steps += 1
+        visited.add(grid.current_pos)
+    success = bool(grid.found_enemy)
+    return {"steps": steps,
+            "collisions": grid.collision_count - initial_collisions,
+            "visited_count": len(visited),
+            "found_enemy": success,
+            "success": success}
 
 
 def report_to_json(stats):
-    """TODO(Q6)：把 stats 序列化为确定性的 JSON 字符串，见题面 Q6 规范。"""
-    raise NotImplementedError("Q6 report_to_json：题面 Q6·报告序列化")
+    """固定键顺序及分隔符，使等价统计得到相同 JSON 文本。"""
+    return json.dumps(stats, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
