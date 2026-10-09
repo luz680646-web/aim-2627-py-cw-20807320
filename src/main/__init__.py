@@ -62,10 +62,74 @@ def status_report(name, robot_type, hp, max_hp, battery):
 # ---------------------------------------------------------------------------
 # Q2 战斗日志分析（题面 Q2·多源日志解析与统计）
 # ---------------------------------------------------------------------------
+def _damage_events(line):
+    """验证整行后返回 (事件列表, 是否有 id, id)，脏行返回 None。"""
+    if not isinstance(line, str):
+        return None
+    line = line.strip()
+    if not line or line.startswith("#"):
+        return None
+    armor_names = {"F": "front", "L": "left", "R": "right"}
+    try:
+        if line.startswith("{"):
+            record = json.loads(line)
+            armor = record.get("armor")
+            damage = record.get("damage")
+            if armor not in armor_names.values():
+                return None
+            # bool 是 int 的子类，但不是题目要求的伤害整数。
+            if type(damage) is not int or damage <= 0:
+                return None
+            has_id = "id" in record
+            event_id = record.get("id")
+            if has_id:
+                hash(event_id)
+            return [(armor, damage)], has_id, event_id
+
+        events = []
+        for segment in line.split(","):
+            label, number = (part.strip() for part in segment.split(":"))
+            if label not in armor_names:
+                return None
+            if not number.isascii() or not number.isdecimal():
+                return None
+            damage = int(number)
+            if damage <= 0:
+                return None
+            events.append((armor_names[label], damage))
+        return events, False, None
+    except (ValueError, TypeError, RecursionError):
+        return None
+
+
 def analyze_damage_log(lines):
-    """TODO(Q2)：解析混合格式伤害日志，返回固定契约的统计 dict；
-    行格式、去重与统计口径见题面 Q2 规范。"""
-    raise NotImplementedError("Q2 analyze_damage_log：题面 Q2·多源日志解析与统计")
+    """跳过脏行，去重后按伤害事件统计；并列按 front/left/right。"""
+    by_armor = {"front": 0, "left": 0, "right": 0}
+    seen_ids = set()
+    event_count = 0
+    try:
+        iterator = iter(lines)
+    except TypeError:
+        iterator = iter(())
+    for line in iterator:
+        parsed = _damage_events(line)
+        if parsed is None:
+            continue
+        events, has_id, event_id = parsed
+        if has_id:
+            if event_id in seen_ids:
+                continue
+            seen_ids.add(event_id)
+        for armor, damage in events:
+            by_armor[armor] += damage
+            event_count += 1
+    total = sum(by_armor.values())
+    return {
+        "total": total,
+        "by_armor": by_armor,
+        "most_hit": max(by_armor, key=by_armor.get) if event_count else None,
+        "avg": round(total / event_count, 2) if event_count else 0.0,
+    }
 
 
 # ---------------------------------------------------------------------------
